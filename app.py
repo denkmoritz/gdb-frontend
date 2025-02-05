@@ -5,6 +5,8 @@ from streamlit_folium import st_folium
 import branca.colormap as cm
 from folium.plugins import HeatMap
 
+
+
 # Constants
 BACKEND_URL = "http://localhost:5003/api"
 DEFAULT_LOCATION = [53.55, 10.0]  # Hamburg example
@@ -18,6 +20,14 @@ if "voronoi_data" not in st.session_state:
     st.session_state.voronoi_data = None
 
 st.set_page_config(layout="wide")
+
+# Function to load custom CSS
+def local_css(file_name):
+    with open(file_name) as f:
+        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+
+# Load the CSS file
+local_css("assets/style.css")
 
 # Sidebar settings
 with st.sidebar:
@@ -111,3 +121,5 @@ if show_heatmap and st.session_state.heatmap_data:
 
 # Display the map
 st_folium(m, use_container_width=True, height=1000, key="map")
+
+
