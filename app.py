@@ -3,87 +3,111 @@ import requests
 import folium
 from streamlit_folium import st_folium
 import branca.colormap as cm
+from folium.plugins import HeatMap
 
 # Constants
-BACKEND_URL = "http://localhost:5003/api/voronoi"
-DEFAULT_LOCATION = [53.55, 10.0]  # Default map center (Hamburg example)
+BACKEND_URL = "http://localhost:5003/api"
+DEFAULT_LOCATION = [53.55, 10.0]  # Hamburg example
 
-# Initialize session state
+# Initialize session state variables
 if "amenity" not in st.session_state:
-    st.session_state.amenity = "cafe"
+    st.session_state.amenity = None
+if "heatmap_data" not in st.session_state:
+    st.session_state.heatmap_data = None
 if "voronoi_data" not in st.session_state:
     st.session_state.voronoi_data = None
-if "run_query" not in st.session_state:
-    st.session_state.run_query = False
 
-# Streamlit UI
 st.set_page_config(layout="wide")
-st.title("🌍 Voronoi Amenity Map")
-st.markdown(f"Voronoi tessellation of {st.session_state.amenity}s in Hamburg using OpenStreetMap data.")
 
-# Sidebar for user inputs
+# Sidebar settings
 with st.sidebar:
     st.header("⚙️ Settings")
-    amenity = st.text_input(
-        "Amenity Type:",
-        value=st.session_state.amenity,
-        help="Type of amenity to search for (e.g., cafe, restaurant, bar, bank)."
+
+    # Dropdown selection for amenities
+    amenity_options = [
+        "restaurant", "cafe", "fast_food", "charging_station",
+        "pub", "bicycle_parking", "bicycle_renting", "bicycle_repair_station"
+    ]
+
+    amenity = st.selectbox(
+        "Select Amenity Type:",
+        options=["Select an amenity..."] + amenity_options,
+        index=0,
+        help="Choose an amenity type from the list."
     )
 
+    # Checkboxes for choosing overlays
+    show_voronoi = st.checkbox("Show Voronoi", value=True)
+    show_heatmap = st.checkbox("Show Heatmap", value=True)
+
     # Button to fetch data
-    if st.button("🔍 Generate Voronoi Map"):
-        st.session_state.amenity = amenity
-        st.session_state.run_query = True
-
-# Fetch Data Only When Button Clicked
-if st.session_state.run_query:
-    st.write("⏳ Fetching Voronoi data...")
-
-    params = {"amenity": st.session_state.amenity}
-
-    try:
-        response = requests.get(BACKEND_URL, params=params)
-        if response.status_code == 200:
-            st.session_state.voronoi_data = response.json()
-            st.success("✅ Voronoi data loaded successfully!")
+    if st.button("🔍 Generate Map"):
+        if amenity != "Select an amenity...":
+            st.session_state.amenity = amenity
+            st.session_state.heatmap_data = None  # Reset heatmap data
+            st.session_state.voronoi_data = None  # Reset Voronoi data
         else:
-            st.error(f"❌ Error loading data: {response.text}")
+            st.warning("⚠️ Please select a valid amenity type.")
 
-    except requests.exceptions.RequestException as e:
-        st.error(f"❌ Request failed: {e}")
+# Show intro page before generating the map
+if not st.session_state.amenity:
+    st.title("🌍 OSM Amenity Analysis")
+    st.markdown("Explore different spatial analyses of OpenStreetMap data in Hamburg.")
+    st.markdown("- Select an amenity and choose overlays from the sidebar.")
+    st.markdown("- Click 'Generate Map' to visualize the data.")
+    st.stop()
 
-    # Reset query flag
-    st.session_state.run_query = False
+# Fetch data only when needed
+params = {"amenity": st.session_state.amenity}
 
-# Show Map If Data Exists
-if st.session_state.voronoi_data:
-    # Create a larger Folium map
-    m = folium.Map(location=DEFAULT_LOCATION, zoom_start=10, control_scale=True)
+if show_heatmap and st.session_state.heatmap_data is None:
+    with st.spinner("⏳ Fetching heatmap data..."):
+        try:
+            response = requests.get(f"{BACKEND_URL}/heatmap", params=params)
+            if response.status_code == 200:
+                st.session_state.heatmap_data = response.json()
+            else:
+                st.error(f"Error loading heatmap data: {response.text}")
+        except requests.exceptions.RequestException as e:
+            st.error(f"Request failed: {e}")
 
-    # Define a soft color scale (blue shades)
-    colormap = cm.linear.Blues_09.scale(0, 1)  # Soft blue gradient
+if show_voronoi and st.session_state.voronoi_data is None:
+    with st.spinner("⏳ Fetching Voronoi data..."):
+        try:
+            response = requests.get(f"{BACKEND_URL}/voronoi", params=params)
+            if response.status_code == 200:
+                st.session_state.voronoi_data = response.json()
+            else:
+                st.error(f"Error loading Voronoi data: {response.text}")
+        except requests.exceptions.RequestException as e:
+            st.error(f"Request failed: {e}")
 
-    # Add Voronoi polygons with smooth styling
+# Create a Folium map
+m = folium.Map(location=DEFAULT_LOCATION, zoom_start=11, control_scale=True)
+
+# Add Voronoi first (if selected)
+if show_voronoi and st.session_state.voronoi_data:
+    colormap = cm.linear.Blues_09.scale(0, 1)
+
     folium.GeoJson(
         st.session_state.voronoi_data,
         name="Voronoi Polygons",
         style_function=lambda feature: {
-            "fillColor": colormap(0.5),  # Soft blue color for all cells
-            "color": "black",  # Thin black borders
-            "weight": 1.5,  # Slightly thicker lines for clarity
-            "fillOpacity": 0.4  # Soft transparency for better map visibility
+            "fillColor": colormap(0.5),
+            "color": "black",
+            "weight": 1.5,
+            "fillOpacity": 0.4
         }
     ).add_to(m)
 
-    # Add amenity markers (optional for better visibility)
-    for feature in st.session_state.voronoi_data["features"]:
-        if feature["geometry"]["type"] == "Point":
-            coords = feature["geometry"]["coordinates"]
-            folium.Marker(
-                location=[coords[1], coords[0]],
-                popup=f"Amenity: {st.session_state.amenity}",
-                icon=folium.Icon(color="red", icon="info-sign")
-            ).add_to(m)
+# Add Heatmap second (so it overlays Voronoi)
+if show_heatmap and st.session_state.heatmap_data:
+    heatmap_data = [
+        [feature["geometry"]["coordinates"][1], feature["geometry"]["coordinates"][0]]
+        for feature in st.session_state.heatmap_data["features"]
+    ]
 
-    # Display the styled map in Streamlit
-    st_folium(m, use_container_width=True, height=1000, key="voronoi_map")
+    HeatMap(heatmap_data, radius=15, blur=10).add_to(m)
+
+# Display the map
+st_folium(m, use_container_width=True, height=1000, key="map")
